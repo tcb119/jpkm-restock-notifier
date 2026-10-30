@@ -1,0 +1,91 @@
+name: Pokémon Center 補貨 Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      check_rounds:
+        description: '執行輪數（留空＝使用 UI 監控設定的輪數）'
+        required: false
+        default: ''
+      test_mode:
+        description: '測試模式：信件標題加上【測試】（填 1 啟用）'
+        required: false
+        default: ''
+      send_test_email:
+        description: '只寄一封測試信確認 Gmail 設定，不執行偵測（填 1 啟用）'
+        required: false
+        default: ''
+
+# 同一時間只跑一個 run（cron-job.org 觸發時若上一輪未結束則排隊），避免狀態檔互相覆蓋造成重複通知
+concurrency:
+  group: pokemon-center-monitor
+  cancel-in-progress: false
+
+# contents: read 供執行中每隔數輪重新讀取 watch_config.json（UI 修改約 1 分鐘內生效）
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-pokemon-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore notified state
+        uses: actions/cache@v4
+        with:
+          path: seen_products.json
+          key: pokemon-seen-${{ github.run_id }}
+          restore-keys: |
+            pokemon-seen-
+
+      - name: Test Pokémon Center connection
+        run: |
+          echo "=== DNS ==="
+          nslookup www.pokemoncenter-online.com || true
+          echo "=== HTTPS ==="
+          curl -s -o /dev/null --connect-timeout 5 --max-time 15 \
+            -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" \
+            -w "HTTP %{http_code} | %{url_effective} | %{time_total}s\n" \
+            "https://www.pokemoncenter-online.com/4521329454221.html" || true
+
+      - name: Run Pokémon Center monitor
+        env:
+          GMAIL_SENDER:     ${{ secrets.GMAIL_SENDER }}
+          GMAIL_PASSWORD:   ${{ secrets.GMAIL_PASSWORD }}
+          GMAIL_RECIPIENTS: ${{ secrets.GMAIL_RECIPIENTS }}
+          CHECK_ROUNDS:     ${{ inputs.check_rounds }}
+          TEST_MODE:        ${{ inputs.test_mode }}
+          SEND_TEST_EMAIL:  ${{ inputs.send_test_email }}
+          STATE_FILE:       'seen_products.json'
+          GITHUB_TOKEN:     ${{ github.token }}
+          # UI 新增的收件人存成 Secret RECIPIENT_N（UI 上限 10 位，與這裡一致）；沒建立的 Secret 會是空字串
+          # 不要改成 toJSON(secrets) 整包傳入：GitHub 會判定為可疑 workflow，每次 run 都要手動核准
+          RECIPIENT_1:      ${{ secrets.RECIPIENT_1 }}
+          RECIPIENT_2:      ${{ secrets.RECIPIENT_2 }}
+          RECIPIENT_3:      ${{ secrets.RECIPIENT_3 }}
+          RECIPIENT_4:      ${{ secrets.RECIPIENT_4 }}
+          RECIPIENT_5:      ${{ secrets.RECIPIENT_5 }}
+          RECIPIENT_6:      ${{ secrets.RECIPIENT_6 }}
+          RECIPIENT_7:      ${{ secrets.RECIPIENT_7 }}
+          RECIPIENT_8:      ${{ secrets.RECIPIENT_8 }}
+          RECIPIENT_9:      ${{ secrets.RECIPIENT_9 }}
+          RECIPIENT_10:     ${{ secrets.RECIPIENT_10 }}
+        run: python pokemon_center_monitor.py
